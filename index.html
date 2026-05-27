@@ -729,11 +729,15 @@
   let pcFitMode = 'contain';
   let pcImgX = 50, pcImgY = 50; // object-position percentages
   let pcDragging = false, pcDragStartX, pcDragStartY, pcDragOriginX, pcDragOriginY;
+  let pcImageSrc = ''; // raw image src stored for canvas export
 
   function openPostcard(btn){
     const entryEl=btn.closest('.entry');
     const entry=JSON.parse(entryEl.dataset.entry||'{}');
     pcFitMode='contain'; pcImgX=50; pcImgY=50;
+    // Store the raw image src for sticker export
+    const images=Array.isArray(entry.images)?entry.images:[];
+    pcImageSrc = images.length ? images[0] : '';
     buildPostcard(entry);
     document.getElementById('pcOvl').classList.add('open');
   }
@@ -906,139 +910,102 @@
   }
 
   async function downloadSticker() {
-    const imgEl = document.getElementById('pcImg');
     const inner = document.getElementById('pcInner');
     if (!inner) return;
 
-    const btn = document.getElementById('stickerBtn');
-    const origText = btn.textContent;
-    btn.textContent = '⏳ Generating...';
-    btn.disabled = true;
+    // Get current image position styles
+    const imgEl = document.getElementById('pcImg');
+    const imgStyle = imgEl
+      ? `object-fit:${pcFitMode};object-position:${pcImgX}% ${pcImgY}%`
+      : '';
 
-    try {
-      // Load font
-      let FONT = "'Arial Black', sans-serif";
-      try {
-        const f = new FontFace('Archivo Black', 'url(https://fonts.gstatic.com/s/archivoblack/v21/HTxqL289NzCGg4MzN6KJ7eW6OYuP_x7yx3A.woff2)');
-        await f.load(); document.fonts.add(f);
-        FONT = "'Archivo Black', sans-serif";
-      } catch(e) {}
-
-      const SCALE   = 3;
-      const W       = 480 * SCALE;
-      const H       = 310 * SCALE;
-      const PERF_H  = 16  * SCALE;
-      const DOT_R   = 4.5 * SCALE;
-      const STRIP_H = 46  * SCALE;
-      const BORDER  = 3   * SCALE;
-      const RADIUS  = 4   * SCALE;
-      const SHADOW  = 6   * SCALE;
-      const PHOTO_Y = PERF_H;
-      const PHOTO_H = H - PERF_H * 2 - STRIP_H;
-      const STRIP_Y = PHOTO_Y + PHOTO_H;
-
-      const canvas  = document.createElement('canvas');
-      canvas.width  = W + SHADOW;
-      canvas.height = H + SHADOW;
-      const ctx     = canvas.getContext('2d');
-
-      // Shadow
-      ctx.shadowColor = '#111'; ctx.shadowOffsetX = SHADOW; ctx.shadowOffsetY = SHADOW; ctx.shadowBlur = 0;
-      ctx.fillStyle = '#fffef5';
-      ctx.beginPath(); ctx.roundRect(0, 0, W, H, RADIUS); ctx.fill();
-      ctx.shadowColor = 'transparent';
-
-      // Clip to card
-      ctx.save();
-      ctx.beginPath(); ctx.roundRect(0, 0, W, H, RADIUS); ctx.clip();
-      ctx.fillStyle = '#fffef5';
-      ctx.fillRect(0, 0, W, H);
-
-      // ── PHOTO: draw imgEl directly — it's already loaded, no CORS issue ──
-      if (imgEl && imgEl.naturalWidth > 0) {
-        ctx.save();
-        ctx.beginPath(); ctx.rect(0, PHOTO_Y, W, PHOTO_H); ctx.clip();
-
-        const iw = imgEl.naturalWidth;
-        const ih = imgEl.naturalHeight;
-
-        if (pcFitMode === 'contain') {
-          ctx.fillStyle = '#fffef5';
-          ctx.fillRect(0, PHOTO_Y, W, PHOTO_H);
-          const s = Math.min(W / iw, PHOTO_H / ih);
-          const dw = iw * s, dh = ih * s;
-          ctx.drawImage(imgEl, 0, 0, iw, ih,
-            (W - dw) / 2, PHOTO_Y + (PHOTO_H - dh) / 2, dw, dh);
-        } else {
-          ctx.fillStyle = '#111';
-          ctx.fillRect(0, PHOTO_Y, W, PHOTO_H);
-          const s = Math.max(W / iw, PHOTO_H / ih);
-          const dw = iw * s, dh = ih * s;
-          ctx.drawImage(imgEl, 0, 0, iw, ih,
-            (W - dw) * (pcImgX / 100),
-            PHOTO_Y + (PHOTO_H - dh) * (pcImgY / 100),
-            dw, dh);
-        }
-        ctx.restore();
-      }
-
-      // Colour strip
-      ctx.fillStyle = pcColor;
-      ctx.fillRect(0, STRIP_Y, W, STRIP_H);
-      ctx.fillStyle = '#111';
-      ctx.fillRect(0, STRIP_Y, W, BORDER);
-
-      // Text
-      const dateText = inner.querySelector('div[style*="0.65rem"]')?.textContent?.trim() || '';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#111';
-      ctx.font = `${10 * SCALE}px ${FONT}`;
-      ctx.fillText(dateText.toUpperCase(), 18 * SCALE, STRIP_Y + STRIP_H / 2);
-      ctx.fillStyle = 'rgba(0,0,0,0.45)';
-      ctx.font = `${9 * SCALE}px ${FONT}`;
-      ctx.textAlign = 'right';
-      ctx.fillText('STASH & SPILL', W - 18 * SCALE, STRIP_Y + STRIP_H / 2);
-      ctx.textAlign = 'left';
-
-      // Perforations
-      const DOT_SPACING = 22 * SCALE;
-      const DOT_COUNT = Math.floor((W - 4 * SCALE) / DOT_SPACING);
-      const DOT_START = (W - (DOT_COUNT - 1) * DOT_SPACING) / 2;
-      function drawPerfs(cy) {
-        ctx.fillStyle = '#111';
-        ctx.fillRect(0, cy - PERF_H / 2, W, PERF_H);
-        ctx.fillStyle = '#fffef5';
-        for (let i = 0; i < DOT_COUNT; i++) {
-          ctx.beginPath();
-          ctx.arc(DOT_START + i * DOT_SPACING, cy, DOT_R, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-      drawPerfs(PERF_H / 2);
-      drawPerfs(H - PERF_H / 2);
-
-      // Border
-      ctx.restore();
-      ctx.strokeStyle = '#111';
-      ctx.lineWidth = BORDER;
-      ctx.beginPath(); ctx.roundRect(BORDER/2, BORDER/2, W - BORDER, H - BORDER, RADIUS); ctx.stroke();
-
-      // Download
-      canvas.toBlob(blob => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = `stash-spill-sticker-${Date.now()}.png`;
-        a.click(); URL.revokeObjectURL(url);
-        toast('Sticker downloaded! 🪄', 'success');
-      }, 'image/png');
-
-    } catch(e) {
-      console.error(e);
-      toast('Could not generate sticker', 'error');
+    // Clone postcard inner HTML and fix image styles for export
+    const clone = inner.cloneNode(true);
+    const cloneImg = clone.querySelector('img');
+    if (cloneImg && imgStyle) {
+      cloneImg.style.cssText = `width:100%;height:100%;display:block;${imgStyle}`;
     }
+    // Remove UI buttons
+    clone.querySelectorAll('button, #pcDragHint').forEach(el => el.remove());
 
-    btn.textContent = origText;
-    btn.disabled = false;
+    const dateText = inner.querySelector('div[style*="0.65rem"]')?.textContent?.trim() || '';
+
+    const win = window.open('', '_blank', 'width=760,height=600');
+    win.document.write(`<!DOCTYPE html><html><head>
+      <meta charset="UTF-8">
+      <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&display=swap" rel="stylesheet">
+      <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body {
+          background: transparent;
+          display: flex; align-items: center; justify-content: center;
+          min-height: 100vh; padding: 40px;
+        }
+        .wrap {
+          width: 480px; height: 310px;
+          filter: drop-shadow(6px 6px 0px #111111);
+        }
+        .wrap > div {
+          width: 100%; height: 100%;
+          display: flex; flex-direction: column;
+          background: #fffef5;
+          border: 3px solid #111;
+          border-radius: 4px;
+          overflow: hidden;
+        }
+        .no-print {
+          position: fixed; bottom: 24px; left: 50%;
+          transform: translateX(-50%);
+          display: flex; gap: 12px;
+        }
+        .no-print button {
+          border: 3px solid #111; border-radius: 4px;
+          padding: 10px 22px;
+          font-family: 'Archivo Black', sans-serif;
+          font-size: 0.8rem; letter-spacing: 0.08em;
+          text-transform: uppercase; cursor: pointer;
+          box-shadow: 3px 3px 0 #111;
+        }
+        .btn-pdf  { background: #e84b1a; color: white; }
+        .btn-png  { background: #582AFF; color: white; }
+        .btn-close{ background: #fffef5; color: #111; }
+        @media print {
+          html, body { padding: 0; background: white; }
+          .wrap { width: 148mm; height: 105mm; }
+          .no-print { display: none; }
+          @page { size: A6 landscape; margin: 4mm; }
+        }
+      </style>
+    </head><body>
+      <div class="wrap">${clone.outerHTML}</div>
+      <div class="no-print">
+        <button class="btn-pdf" onclick="window.print()">🖨 Save as PDF</button>
+        <button class="btn-png" onclick="savePng()">🪄 Save as PNG Sticker</button>
+        <button class="btn-close" onclick="window.close()">Close</button>
+      </div>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"><\/script>
+      <script>
+        async function savePng() {
+          const el = document.querySelector('.wrap > div');
+          const canvas = await html2canvas(el, {
+            scale: 3,
+            useCORS: true,
+            allowTaint: true,
+            backgroundColor: null,
+            logging: false
+          });
+          canvas.toBlob(blob => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'stash-spill-sticker-' + Date.now() + '.png';
+            a.click();
+            URL.revokeObjectURL(url);
+          }, 'image/png');
+        }
+      <\/script>
+    </body></html>`);
+    win.document.close();
   }
 
   /* ── EDIT SHEET ── */
