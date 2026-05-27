@@ -975,23 +975,26 @@
 
         // Respect user's chosen fit mode and drag position
         if (pcFitMode === 'contain') {
-          // Show full image, letterbox with cream bg
+          // Show full image, letterbox with cream bg — never stretch
           ctx.fillStyle = '#fffef5';
           ctx.fillRect(0, PHOTO_Y, W, PHOTO_H);
           const iw = photoImg.naturalWidth;
           const ih = photoImg.naturalHeight;
+          // Scale DOWN only — never up beyond natural size
           const scale = Math.min(W / iw, PHOTO_H / ih);
           const dw = iw * scale;
           const dh = ih * scale;
+          // Centre the image
           const dx = (W - dw) / 2;
           const dy = PHOTO_Y + (PHOTO_H - dh) / 2;
-          ctx.drawImage(photoImg, dx, dy, dw, dh);
+          ctx.drawImage(photoImg, 0, 0, iw, ih, dx, dy, dw, dh);
         } else {
-          // Cover: use exact object-position the user dragged to
+          // Cover: scale to fill while maintaining aspect ratio, then position
           ctx.fillStyle = '#111';
           ctx.fillRect(0, PHOTO_Y, W, PHOTO_H);
           const iw = photoImg.naturalWidth;
           const ih = photoImg.naturalHeight;
+          // Scale so image COVERS the area without stretching
           const scale = Math.max(W / iw, PHOTO_H / ih);
           const dw = iw * scale;
           const dh = ih * scale;
