@@ -906,8 +906,8 @@
   }
 
   async function downloadSticker() {
-    const imgEl  = document.getElementById('pcImg');
-    const inner  = document.getElementById('pcInner');
+    const imgEl = document.getElementById('pcImg');
+    const inner = document.getElementById('pcInner');
     if (!inner) return;
 
     const btn = document.getElementById('stickerBtn');
@@ -916,16 +916,14 @@
     btn.disabled = true;
 
     try {
-      // Load Archivo Black font
+      // Load font
       let FONT = "'Arial Black', sans-serif";
       try {
         const f = new FontFace('Archivo Black', 'url(https://fonts.gstatic.com/s/archivoblack/v21/HTxqL289NzCGg4MzN6KJ7eW6OYuP_x7yx3A.woff2)');
-        await f.load();
-        document.fonts.add(f);
+        await f.load(); document.fonts.add(f);
         FONT = "'Archivo Black', sans-serif";
       } catch(e) {}
 
-      // Fixed postcard dimensions
       const SCALE   = 3;
       const W       = 480 * SCALE;
       const H       = 310 * SCALE;
@@ -939,71 +937,49 @@
       const PHOTO_H = H - PERF_H * 2 - STRIP_H;
       const STRIP_Y = PHOTO_Y + PHOTO_H;
 
-      // Canvas with shadow room
       const canvas  = document.createElement('canvas');
       canvas.width  = W + SHADOW;
       canvas.height = H + SHADOW;
       const ctx     = canvas.getContext('2d');
 
       // Shadow
-      ctx.shadowColor   = '#111111';
-      ctx.shadowOffsetX = SHADOW;
-      ctx.shadowOffsetY = SHADOW;
-      ctx.shadowBlur    = 0;
-      ctx.fillStyle     = '#fffef5';
+      ctx.shadowColor = '#111'; ctx.shadowOffsetX = SHADOW; ctx.shadowOffsetY = SHADOW; ctx.shadowBlur = 0;
+      ctx.fillStyle = '#fffef5';
       ctx.beginPath(); ctx.roundRect(0, 0, W, H, RADIUS); ctx.fill();
-      ctx.shadowColor   = 'transparent';
+      ctx.shadowColor = 'transparent';
 
       // Clip to card
       ctx.save();
       ctx.beginPath(); ctx.roundRect(0, 0, W, H, RADIUS); ctx.clip();
-
-      // Background
       ctx.fillStyle = '#fffef5';
       ctx.fillRect(0, 0, W, H);
 
-      // ── PHOTO — draw from a fresh offscreen canvas to avoid CORS/stretch ──
-      if (imgEl && imgEl.src) {
-        // Draw the already-rendered img element via an offscreen canvas
-        // This captures EXACTLY what the user sees — no reloading, no stretching
-        const offscreen = document.createElement('canvas');
-        const imgRect   = imgEl.getBoundingClientRect();
-        offscreen.width  = Math.round(imgRect.width);
-        offscreen.height = Math.round(imgRect.height);
-        const octx = offscreen.getContext('2d');
+      // ── PHOTO: draw imgEl directly — it's already loaded, no CORS issue ──
+      if (imgEl && imgEl.naturalWidth > 0) {
+        ctx.save();
+        ctx.beginPath(); ctx.rect(0, PHOTO_Y, W, PHOTO_H); ctx.clip();
 
-        // Load fresh copy for canvas (avoids taint)
-        const fresh = new Image();
-        fresh.crossOrigin = 'anonymous';
-        await new Promise(res => { fresh.onload = fresh.onerror = res; fresh.src = imgEl.src; });
+        const iw = imgEl.naturalWidth;
+        const ih = imgEl.naturalHeight;
 
-        if (fresh.naturalWidth > 0) {
-          const iw = fresh.naturalWidth;
-          const ih = fresh.naturalHeight;
-          const ow = offscreen.width;
-          const oh = offscreen.height;
-
-          // Replicate CSS object-fit exactly
-          if (pcFitMode === 'contain') {
-            const s  = Math.min(ow / iw, oh / ih);
-            const dw = iw * s, dh = ih * s;
-            octx.fillStyle = '#fffef5';
-            octx.fillRect(0, 0, ow, oh);
-            octx.drawImage(fresh, 0, 0, iw, ih,
-              (ow - dw) / 2, (oh - dh) / 2, dw, dh);
-          } else {
-            const s  = Math.max(ow / iw, oh / ih);
-            const dw = iw * s, dh = ih * s;
-            octx.drawImage(fresh, 0, 0, iw, ih,
-              (ow - dw) * (pcImgX / 100), (oh - dh) * (pcImgY / 100), dw, dh);
-          }
-
-          // Scale the offscreen canvas into the photo area
-          ctx.save();
-          ctx.beginPath(); ctx.rect(0, PHOTO_Y, W, PHOTO_H); ctx.clip();
-          ctx.drawImage(offscreen, 0, 0, ow, oh, 0, PHOTO_Y, W, PHOTO_H);
-          ctx.restore();
+        if (pcFitMode === 'contain') {
+          ctx.fillStyle = '#fffef5';
+          ctx.fillRect(0, PHOTO_Y, W, PHOTO_H);
+          const s = Math.min(W / iw, PHOTO_H / ih);
+          const dw = iw * s, dh = ih * s;
+          ctx.drawImage(imgEl, 0, 0, iw, ih,
+            (W - dw) / 2, PHOTO_Y + (PHOTO_H - dh) / 2, dw, dh);
+        } else {
+          ctx.fillStyle = '#111';
+          ctx.fillRect(0, PHOTO_Y, W, PHOTO_H);
+          const s = Math.max(W / iw, PHOTO_H / ih);
+          const dw = iw * s, dh = ih * s;
+          ctx.drawImage(imgEl, 0, 0, iw, ih,
+            (W - dw) * (pcImgX / 100),
+            PHOTO_Y + (PHOTO_H - dh) * (pcImgY / 100),
+            dw, dh);
         }
+        ctx.restore();
       }
 
       // Colour strip
@@ -1015,21 +991,21 @@
       // Text
       const dateText = inner.querySelector('div[style*="0.65rem"]')?.textContent?.trim() || '';
       ctx.textBaseline = 'middle';
-      ctx.fillStyle    = '#111111';
-      ctx.font         = `${10 * SCALE}px ${FONT}`;
+      ctx.fillStyle = '#111';
+      ctx.font = `${10 * SCALE}px ${FONT}`;
       ctx.fillText(dateText.toUpperCase(), 18 * SCALE, STRIP_Y + STRIP_H / 2);
       ctx.fillStyle = 'rgba(0,0,0,0.45)';
-      ctx.font      = `${9 * SCALE}px ${FONT}`;
+      ctx.font = `${9 * SCALE}px ${FONT}`;
       ctx.textAlign = 'right';
       ctx.fillText('STASH & SPILL', W - 18 * SCALE, STRIP_Y + STRIP_H / 2);
       ctx.textAlign = 'left';
 
       // Perforations
       const DOT_SPACING = 22 * SCALE;
-      const DOT_COUNT   = Math.floor((W - 4 * SCALE) / DOT_SPACING);
-      const DOT_START   = (W - (DOT_COUNT - 1) * DOT_SPACING) / 2;
+      const DOT_COUNT = Math.floor((W - 4 * SCALE) / DOT_SPACING);
+      const DOT_START = (W - (DOT_COUNT - 1) * DOT_SPACING) / 2;
       function drawPerfs(cy) {
-        ctx.fillStyle = '#111111';
+        ctx.fillStyle = '#111';
         ctx.fillRect(0, cy - PERF_H / 2, W, PERF_H);
         ctx.fillStyle = '#fffef5';
         for (let i = 0; i < DOT_COUNT; i++) {
@@ -1043,8 +1019,8 @@
 
       // Border
       ctx.restore();
-      ctx.strokeStyle = '#111111';
-      ctx.lineWidth   = BORDER;
+      ctx.strokeStyle = '#111';
+      ctx.lineWidth = BORDER;
       ctx.beginPath(); ctx.roundRect(BORDER/2, BORDER/2, W - BORDER, H - BORDER, RADIUS); ctx.stroke();
 
       // Download
