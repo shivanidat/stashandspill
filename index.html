@@ -738,11 +738,14 @@
     document.getElementById('pcOvl').classList.add('open');
   }
 
+  let pcColor = '#582AFF'; // stores the accent color of the current postcard
+
   function buildPostcard(entry){
     const images=Array.isArray(entry.images)?entry.images:[];
     const date=fmtDate(entry.date||entry.created_at);
     const mood=entry.mood||'✨';
     const color=COLORS[Math.floor(Math.random()*COLORS.length)];
+    pcColor = color; // save for sticker export
     const hasPhoto=images.length>0;
     const hDots=Array(26).fill('<div style="width:9px;height:9px;background:#fffef5;border-radius:50%;flex-shrink:0"></div>').join('');
 
@@ -903,8 +906,8 @@
   }
 
   async function downloadSticker() {
-    const inner = document.getElementById('pcInner');
     const img   = document.getElementById('pcImg');
+    const inner = document.getElementById('pcInner');
     if (!inner) return;
 
     const btn = document.getElementById('stickerBtn');
@@ -913,165 +916,116 @@
     btn.disabled = true;
 
     try {
-      // Get the exact pixel dimensions of the postcard as rendered
-      const rect = inner.getBoundingClientRect();
-      const SCALE = 3;
-      const W = Math.round(rect.width  * SCALE);
-      const H = Math.round(rect.height * SCALE);
+      // Fixed postcard proportions matching the preview (480x310)
+      const SCALE  = 4;
+      const W      = 480 * SCALE;
+      const H      = 310 * SCALE;
+      const PERF_H = 16  * SCALE;
+      const STRIP_H= 48  * SCALE;
+      const BORDER = 3   * SCALE;
+      const RADIUS = 4   * SCALE;
+      const DOT_R  = 4.5 * SCALE;
+      const PHOTO_Y= PERF_H;
+      const PHOTO_H= H - PERF_H * 2 - STRIP_H;
+      const STRIP_Y= PHOTO_Y + PHOTO_H;
 
       const canvas = document.createElement('canvas');
-      canvas.width  = W;
-      canvas.height = H;
+      canvas.width = W; canvas.height = H;
       const ctx = canvas.getContext('2d');
 
-      // ── Helper: draw rounded rect ──
-      function roundRect(x, y, w, h, r) {
-        ctx.beginPath();
-        ctx.moveTo(x + r, y);
-        ctx.lineTo(x + w - r, y);
-        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-        ctx.lineTo(x + w, y + h - r);
-        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-        ctx.lineTo(x + r, y + h);
-        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-        ctx.lineTo(x, y + r);
-        ctx.quadraticCurveTo(x, y, x + r, y);
-        ctx.closePath();
-      }
+      // Clip to rounded rect
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(0, 0, W, H, RADIUS);
+      ctx.clip();
 
-      // ── Clip to rounded rect ──
-      const BORDER = 3 * SCALE;
-      const RADIUS = 4 * SCALE;
-      roundRect(0, 0, W, H, RADIUS);
-      ctx.save(); ctx.clip();
-
-      // ── Background ──
+      // Cream background
       ctx.fillStyle = '#fffef5';
       ctx.fillRect(0, 0, W, H);
 
-      // ── Measure sections ──
-      const PERF_H = 16 * SCALE;
-      const STRIP_H = 48 * SCALE; // bottom colour strip
-      const PHOTO_H = H - PERF_H * 2 - STRIP_H;
-      const PHOTO_Y = PERF_H;
-
-      // ── Get the accent colour from the strip ──
-      const stripEl = inner.querySelector('div[style*="border-top"]');
-      const stripBg = stripEl ? stripEl.style.background : '#582AFF';
-
-      // ── Draw photo section ──
+      // Photo
       if (img && img.src) {
         const photoImg = new Image();
         photoImg.crossOrigin = 'anonymous';
-        await new Promise((res, rej) => {
-          photoImg.onload = res;
-          photoImg.onerror = rej;
-          photoImg.src = img.src;
-        });
-
-        ctx.save();
-        ctx.rect(0, PHOTO_Y, W, PHOTO_H);
-        ctx.clip();
-
-        // Respect user's chosen fit mode and drag position
-        if (pcFitMode === 'contain') {
-          // Show full image, letterbox with cream bg — never stretch
-          ctx.fillStyle = '#fffef5';
-          ctx.fillRect(0, PHOTO_Y, W, PHOTO_H);
-          const iw = photoImg.naturalWidth;
-          const ih = photoImg.naturalHeight;
-          // Scale DOWN only — never up beyond natural size
-          const scale = Math.min(W / iw, PHOTO_H / ih);
-          const dw = iw * scale;
-          const dh = ih * scale;
-          // Centre the image
-          const dx = (W - dw) / 2;
-          const dy = PHOTO_Y + (PHOTO_H - dh) / 2;
-          ctx.drawImage(photoImg, 0, 0, iw, ih, dx, dy, dw, dh);
-        } else {
-          // Cover: scale to fill while maintaining aspect ratio, then position
-          ctx.fillStyle = '#111';
-          ctx.fillRect(0, PHOTO_Y, W, PHOTO_H);
-          const iw = photoImg.naturalWidth;
-          const ih = photoImg.naturalHeight;
-          // Scale so image COVERS the area without stretching
-          const scale = Math.max(W / iw, PHOTO_H / ih);
-          const dw = iw * scale;
-          const dh = ih * scale;
-          // Apply user's drag position (pcImgX, pcImgY as percentages)
-          const dx = (W - dw) * (pcImgX / 100);
-          const dy = PHOTO_Y + (PHOTO_H - dh) * (pcImgY / 100);
-          ctx.drawImage(photoImg, dx, dy, dw, dh);
+        await new Promise(res => { photoImg.onload = photoImg.onerror = res; photoImg.src = img.src; });
+        if (photoImg.naturalWidth > 0) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(0, PHOTO_Y, W, PHOTO_H);
+          ctx.clip();
+          const iw = photoImg.naturalWidth, ih = photoImg.naturalHeight;
+          if (pcFitMode === 'contain') {
+            ctx.fillStyle = '#fffef5';
+            ctx.fillRect(0, PHOTO_Y, W, PHOTO_H);
+            const s = Math.min(W / iw, PHOTO_H / ih);
+            const dw = iw*s, dh = ih*s;
+            ctx.drawImage(photoImg, 0,0,iw,ih, (W-dw)/2, PHOTO_Y+(PHOTO_H-dh)/2, dw, dh);
+          } else {
+            ctx.fillStyle = '#111';
+            ctx.fillRect(0, PHOTO_Y, W, PHOTO_H);
+            const s = Math.max(W / iw, PHOTO_H / ih);
+            const dw = iw*s, dh = ih*s;
+            ctx.drawImage(photoImg, 0,0,iw,ih, (W-dw)*(pcImgX/100), PHOTO_Y+(PHOTO_H-dh)*(pcImgY/100), dw, dh);
+          }
+          ctx.restore();
         }
-        ctx.restore();
       }
 
-      // ── Colour strip ──
-      const STRIP_Y = PHOTO_Y + PHOTO_H;
-      ctx.fillStyle = stripBg;
+      // Colour strip
+      ctx.fillStyle = pcColor;
       ctx.fillRect(0, STRIP_Y, W, STRIP_H);
-
-      // Border between photo and strip
       ctx.fillStyle = '#111';
       ctx.fillRect(0, STRIP_Y, W, BORDER);
 
-      // ── Date text on strip ──
-      const dateEl = inner.querySelector('.e-date, [style*="letter-spacing"]');
-      const dateText = inner.querySelector('div[style*="0.65rem"]')?.textContent || '';
+      // Date + label text
+      const dateText = inner.querySelector('div[style*="0.65rem"]')?.textContent?.trim() || '';
+      ctx.textBaseline = 'middle';
       ctx.fillStyle = '#111';
-      ctx.font = `bold ${10 * SCALE}px Arial`;
-      ctx.fillText(dateText, 18 * SCALE, STRIP_Y + 30 * SCALE);
-
-      // Stash & Spill label
+      ctx.font = `bold ${10*SCALE}px Arial`;
+      ctx.fillText(dateText, 18*SCALE, STRIP_Y + STRIP_H/2);
       ctx.fillStyle = 'rgba(0,0,0,0.45)';
-      ctx.font = `bold ${9 * SCALE}px Arial`;
+      ctx.font = `bold ${9*SCALE}px Arial`;
       ctx.textAlign = 'right';
-      ctx.fillText('STASH & SPILL', W - 18 * SCALE, STRIP_Y + 30 * SCALE);
+      ctx.fillText('STASH & SPILL', W - 18*SCALE, STRIP_Y + STRIP_H/2);
       ctx.textAlign = 'left';
 
-      // ── Perforations ──
-      const DOT_R  = 9 * SCALE;
-      const DOT_GAP = 24 * SCALE;
-      const DOT_COUNT = Math.floor(W / DOT_GAP);
-      const DOT_OFFSET = (W - (DOT_COUNT - 1) * DOT_GAP) / 2;
-
-      function drawPerfs(y) {
+      // Perforations — black bar with cream dots
+      const DOT_SPACING = 24 * SCALE;
+      const DOT_COUNT   = Math.floor(W / DOT_SPACING);
+      const DOT_START   = (W - (DOT_COUNT-1) * DOT_SPACING) / 2;
+      function drawPerfs(cy) {
         ctx.fillStyle = '#111';
-        ctx.fillRect(0, y - DOT_R * 0.6, W, DOT_R * 1.4);
+        ctx.fillRect(0, cy - PERF_H/2, W, PERF_H);
         ctx.fillStyle = '#fffef5';
-        for (let i = 0; i < DOT_COUNT; i++) {
+        for (let i=0; i<DOT_COUNT; i++) {
           ctx.beginPath();
-          ctx.arc(DOT_OFFSET + i * DOT_GAP, y, DOT_R, 0, Math.PI * 2);
+          ctx.arc(DOT_START + i*DOT_SPACING, cy, DOT_R, 0, Math.PI*2);
           ctx.fill();
         }
       }
-
-      // Top perf strip
       drawPerfs(PERF_H / 2);
-      // Bottom perf strip
       drawPerfs(H - PERF_H / 2);
 
-      // ── Outer border ──
-      ctx.restore(); // remove clip
-      roundRect(BORDER/2, BORDER/2, W - BORDER, H - BORDER, RADIUS);
+      // Outer border
+      ctx.restore();
       ctx.strokeStyle = '#111';
       ctx.lineWidth = BORDER;
+      ctx.beginPath();
+      ctx.roundRect(BORDER/2, BORDER/2, W-BORDER, H-BORDER, RADIUS);
       ctx.stroke();
 
-      // ── Download ──
+      // Download
       canvas.toBlob(blob => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url;
-        a.download = `stash-spill-sticker-${Date.now()}.png`;
-        a.click();
-        URL.revokeObjectURL(url);
+        a.href = url; a.download = `stash-spill-sticker-${Date.now()}.png`;
+        a.click(); URL.revokeObjectURL(url);
         toast('Sticker downloaded! 🪄', 'success');
       }, 'image/png');
 
     } catch(e) {
       console.error(e);
-      toast('Could not generate sticker — try switching to Fill mode', 'error');
+      toast('Could not generate sticker', 'error');
     }
 
     btn.textContent = origText;
