@@ -904,6 +904,7 @@
 
   async function downloadSticker() {
     const inner = document.getElementById('pcInner');
+    const img   = document.getElementById('pcImg');
     if (!inner) return;
 
     const btn = document.getElementById('stickerBtn');
@@ -912,33 +913,149 @@
     btn.disabled = true;
 
     try {
-      // Fix image position before capture
-      const img = document.getElementById('pcImg');
-      if (img) {
-        img.style.objectFit = pcFitMode;
-        img.style.objectPosition = `${pcImgX}% ${pcImgY}%`;
+      // Get the exact pixel dimensions of the postcard as rendered
+      const rect = inner.getBoundingClientRect();
+      const SCALE = 3;
+      const W = Math.round(rect.width  * SCALE);
+      const H = Math.round(rect.height * SCALE);
+
+      const canvas = document.createElement('canvas');
+      canvas.width  = W;
+      canvas.height = H;
+      const ctx = canvas.getContext('2d');
+
+      // ── Helper: draw rounded rect ──
+      function roundRect(x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
       }
-      // Hide drag hint temporarily
-      const hint = document.getElementById('pcDragHint');
-      if (hint) hint.style.display = 'none';
-      // Hide fit button temporarily
-      const fitBtn = document.getElementById('fitToggleBtn');
-      if (fitBtn) fitBtn.style.display = 'none';
 
-      // Capture the postcard at 3x resolution for crisp sticker quality
-      const canvas = await html2canvas(inner, {
-        scale: 3,
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: null, // transparent!
-        logging: false,
-      });
+      // ── Clip to rounded rect ──
+      const BORDER = 3 * SCALE;
+      const RADIUS = 4 * SCALE;
+      roundRect(0, 0, W, H, RADIUS);
+      ctx.save(); ctx.clip();
 
-      // Restore hidden elements
-      if (hint) hint.style.display = '';
-      if (fitBtn) fitBtn.style.display = '';
+      // ── Background ──
+      ctx.fillStyle = '#fffef5';
+      ctx.fillRect(0, 0, W, H);
 
-      // Convert to PNG blob and download
+      // ── Measure sections ──
+      const PERF_H = 16 * SCALE;
+      const STRIP_H = 48 * SCALE; // bottom colour strip
+      const PHOTO_H = H - PERF_H * 2 - STRIP_H;
+      const PHOTO_Y = PERF_H;
+
+      // ── Get the accent colour from the strip ──
+      const stripEl = inner.querySelector('div[style*="border-top"]');
+      const stripBg = stripEl ? stripEl.style.background : '#582AFF';
+
+      // ── Draw photo section ──
+      if (img && img.src) {
+        const photoImg = new Image();
+        photoImg.crossOrigin = 'anonymous';
+        await new Promise((res, rej) => {
+          photoImg.onload = res;
+          photoImg.onerror = rej;
+          photoImg.src = img.src;
+        });
+
+        ctx.save();
+        ctx.rect(0, PHOTO_Y, W, PHOTO_H);
+        ctx.clip();
+
+        // Respect user's chosen fit mode and drag position
+        if (pcFitMode === 'contain') {
+          // Show full image, letterbox with cream bg
+          ctx.fillStyle = '#fffef5';
+          ctx.fillRect(0, PHOTO_Y, W, PHOTO_H);
+          const iw = photoImg.naturalWidth;
+          const ih = photoImg.naturalHeight;
+          const scale = Math.min(W / iw, PHOTO_H / ih);
+          const dw = iw * scale;
+          const dh = ih * scale;
+          const dx = (W - dw) / 2;
+          const dy = PHOTO_Y + (PHOTO_H - dh) / 2;
+          ctx.drawImage(photoImg, dx, dy, dw, dh);
+        } else {
+          // Cover: use exact object-position the user dragged to
+          ctx.fillStyle = '#111';
+          ctx.fillRect(0, PHOTO_Y, W, PHOTO_H);
+          const iw = photoImg.naturalWidth;
+          const ih = photoImg.naturalHeight;
+          const scale = Math.max(W / iw, PHOTO_H / ih);
+          const dw = iw * scale;
+          const dh = ih * scale;
+          // Apply user's drag position (pcImgX, pcImgY as percentages)
+          const dx = (W - dw) * (pcImgX / 100);
+          const dy = PHOTO_Y + (PHOTO_H - dh) * (pcImgY / 100);
+          ctx.drawImage(photoImg, dx, dy, dw, dh);
+        }
+        ctx.restore();
+      }
+
+      // ── Colour strip ──
+      const STRIP_Y = PHOTO_Y + PHOTO_H;
+      ctx.fillStyle = stripBg;
+      ctx.fillRect(0, STRIP_Y, W, STRIP_H);
+
+      // Border between photo and strip
+      ctx.fillStyle = '#111';
+      ctx.fillRect(0, STRIP_Y, W, BORDER);
+
+      // ── Date text on strip ──
+      const dateEl = inner.querySelector('.e-date, [style*="letter-spacing"]');
+      const dateText = inner.querySelector('div[style*="0.65rem"]')?.textContent || '';
+      ctx.fillStyle = '#111';
+      ctx.font = `bold ${10 * SCALE}px Arial`;
+      ctx.fillText(dateText, 18 * SCALE, STRIP_Y + 30 * SCALE);
+
+      // Stash & Spill label
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.font = `bold ${9 * SCALE}px Arial`;
+      ctx.textAlign = 'right';
+      ctx.fillText('STASH & SPILL', W - 18 * SCALE, STRIP_Y + 30 * SCALE);
+      ctx.textAlign = 'left';
+
+      // ── Perforations ──
+      const DOT_R  = 9 * SCALE;
+      const DOT_GAP = 24 * SCALE;
+      const DOT_COUNT = Math.floor(W / DOT_GAP);
+      const DOT_OFFSET = (W - (DOT_COUNT - 1) * DOT_GAP) / 2;
+
+      function drawPerfs(y) {
+        ctx.fillStyle = '#111';
+        ctx.fillRect(0, y - DOT_R * 0.6, W, DOT_R * 1.4);
+        ctx.fillStyle = '#fffef5';
+        for (let i = 0; i < DOT_COUNT; i++) {
+          ctx.beginPath();
+          ctx.arc(DOT_OFFSET + i * DOT_GAP, y, DOT_R, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      // Top perf strip
+      drawPerfs(PERF_H / 2);
+      // Bottom perf strip
+      drawPerfs(H - PERF_H / 2);
+
+      // ── Outer border ──
+      ctx.restore(); // remove clip
+      roundRect(BORDER/2, BORDER/2, W - BORDER, H - BORDER, RADIUS);
+      ctx.strokeStyle = '#111';
+      ctx.lineWidth = BORDER;
+      ctx.stroke();
+
+      // ── Download ──
       canvas.toBlob(blob => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -951,7 +1068,7 @@
 
     } catch(e) {
       console.error(e);
-      toast('Could not generate sticker', 'error');
+      toast('Could not generate sticker — try switching to Fill mode', 'error');
     }
 
     btn.textContent = origText;
