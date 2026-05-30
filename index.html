@@ -577,20 +577,23 @@
     if (!data||!data.length){showEmpty();return;}
     data.forEach(e=>renderEntry(e,false));
     syncCount();
-    // Load images in background one by one
-    data.forEach(async e=>{
-      const {data:imgData}=await sb.from('entries').select('id, images').eq('id',e.id).single();
-      if(imgData?.images?.length){
-        document.querySelectorAll(`.entry[data-id="${imgData.id}"]`).forEach(el=>{
-          const existing=el.querySelector('.e-images');
-          if(existing) return;
-          const ns=document.createElement('div');ns.className='e-images';
-          ns.innerHTML=imgData.images.map(src=>`<div class="e-img-wrap"><img src="${x(src)}" alt="" onclick="openLb('${x(src)}')"><button class="fit-btn" onclick="toggleFit(this)">⊡ Fit</button><button class="del-eimg" onclick="removeEImg(this,'${x(String(imgData.id))}','${x(src)}')">✕</button></div>`).join('');
-          el.insertBefore(ns,el.querySelector('.e-body'));
-          try{const s=JSON.parse(el.dataset.entry||'{}');s.images=imgData.images;el.dataset.entry=JSON.stringify(s);}catch(err){}
-        });
-      }
-    });
+    // Load images sequentially to avoid rate limiting
+    for (const e of data) {
+      try {
+        const {data:imgData}=await sb.from('entries').select('id, images').eq('id',e.id).single();
+        if(imgData?.images?.length){
+          document.querySelectorAll(`.entry[data-id="${imgData.id}"]`).forEach(el=>{
+            const existing=el.querySelector('.e-images');
+            if(existing) return;
+            const ns=document.createElement('div');ns.className='e-images';
+            ns.innerHTML=imgData.images.map(src=>`<div class="e-img-wrap"><img src="${x(src)}" alt="" onclick="openLb('${x(src)}')"><button class="fit-btn" onclick="toggleFit(this)">⊡ Fit</button><button class="del-eimg" onclick="removeEImg(this,'${x(String(imgData.id))}','${x(src)}')">✕</button></div>`).join('');
+            el.insertBefore(ns,el.querySelector('.e-body'));
+            try{const s=JSON.parse(el.dataset.entry||'{}');s.images=imgData.images;el.dataset.entry=JSON.stringify(s);}catch(err){}
+          });
+        }
+        await new Promise(r=>setTimeout(r,150)); // small delay between fetches
+      } catch(err){ console.error('Image load failed for', e.id, err); }
+    }
   }
 
   document.getElementById('dFile').addEventListener('change',e=>Array.from(e.target.files).forEach(f=>readF(f,'d')));
@@ -672,7 +675,8 @@
     document.getElementById('dEmpty')?.remove();
     document.getElementById('mEmpty')?.remove();
     const images=Array.isArray(entry.images)?entry.images:[];
-    const tags=Array.isArray(entry.tags)?entry.tags:[];
+    // Filter out default 'memory' tag
+    const tags=(Array.isArray(entry.tags)?entry.tags:[]).filter(t=>t&&t.toLowerCase()!=='memory');
     const color=COLORS[cc%COLORS.length];
     if(!prepend)cc++;
 
@@ -685,12 +689,16 @@
 
     const tagsHtml=tags.map((t,i)=>{const tc=TAGS[i%TAGS.length];return `<span class="tag" style="background:${tc.bg};color:${tc.fg}">${x(t)}</span>`;}).join('');
 
+    // Mood circle uses same color as the entry bar
+    const moodBg = color;
+    const moodFg = ['#582AFF','#1a7a4a','#1a8c8c','#d42020'].includes(color) ? '#f5c518' : '#111';
+
     const html=`
       <div class="e-bar" style="background:${color}"></div>
       ${imgsHtml}
       <div class="e-body">
         <div class="e-meta">
-          <div class="e-mood">${x(entry.mood||'✨')}</div>
+          <div class="e-mood" style="background:${moodBg};border-color:${moodBg};color:${moodFg}">${x(entry.mood||'✨')}</div>
           <div class="e-date">${fmtDate(entry.date||entry.created_at)}</div>
         </div>
         <div class="e-desc">${x(entry.description)}</div>
@@ -913,86 +921,87 @@
     const inner = document.getElementById('pcInner');
     if (!inner) return;
 
-    // Get current image position styles
     const imgEl = document.getElementById('pcImg');
     const imgStyle = imgEl
       ? `object-fit:${pcFitMode};object-position:${pcImgX}% ${pcImgY}%`
       : '';
 
-    // Clone postcard inner HTML and fix image styles for export
+    // Clone postcard and clean up UI elements
     const clone = inner.cloneNode(true);
     const cloneImg = clone.querySelector('img');
     if (cloneImg && imgStyle) {
       cloneImg.style.cssText = `width:100%;height:100%;display:block;${imgStyle}`;
     }
-    // Remove UI buttons
     clone.querySelectorAll('button, #pcDragHint').forEach(el => el.remove());
 
-    const dateText = inner.querySelector('div[style*="0.65rem"]')?.textContent?.trim() || '';
-
-    const win = window.open('', '_blank', 'width=760,height=600');
+    const win = window.open('', '_blank', 'width=640,height=500');
     win.document.write(`<!DOCTYPE html><html><head>
       <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&display=swap" rel="stylesheet">
       <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         html, body {
-          background: transparent;
-          display: flex; align-items: center; justify-content: center;
-          min-height: 100vh; padding: 40px;
+          background: #f0f0f0;
+          display: flex; flex-direction: column;
+          align-items: center; justify-content: center;
+          min-height: 100vh; gap: 28px; padding: 32px 20px;
         }
         .wrap {
-          width: 480px; height: 310px;
+          width: 480px; height: 310px; flex-shrink: 0;
           filter: drop-shadow(6px 6px 0px #111111);
         }
         .wrap > div {
-          width: 100%; height: 100%;
+          width: 480px !important; height: 310px !important;
           display: flex; flex-direction: column;
           background: #fffef5;
           border: 3px solid #111;
           border-radius: 4px;
           overflow: hidden;
         }
-        .no-print {
-          position: fixed; bottom: 24px; left: 50%;
-          transform: translateX(-50%);
-          display: flex; gap: 12px;
+        .wrap img {
+          width: 100% !important;
+          height: 100% !important;
+          display: block !important;
         }
-        .no-print button {
+        .actions { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+        .actions button {
           border: 3px solid #111; border-radius: 4px;
-          padding: 10px 22px;
+          padding: 12px 24px;
           font-family: 'Archivo Black', sans-serif;
-          font-size: 0.8rem; letter-spacing: 0.08em;
+          font-size: 0.78rem; letter-spacing: 0.08em;
           text-transform: uppercase; cursor: pointer;
-          box-shadow: 3px 3px 0 #111;
+          box-shadow: 4px 4px 0 #111;
         }
-        .btn-pdf  { background: #e84b1a; color: white; }
-        .btn-png  { background: #582AFF; color: white; }
-        .btn-close{ background: #fffef5; color: #111; }
-        @media print {
-          html, body { padding: 0; background: white; }
-          .wrap { width: 148mm; height: 105mm; }
-          .no-print { display: none; }
-          @page { size: A6 landscape; margin: 4mm; }
-        }
+        .btn-png   { background: #582AFF; color: white; }
+        .btn-close { background: #fffef5; color: #111; }
+        #status { font-family: 'Archivo Black', sans-serif; font-size: 0.7rem; color: #666; letter-spacing: 0.1em; text-transform: uppercase; min-height: 20px; }
       </style>
     </head><body>
-      <div class="wrap">${clone.outerHTML}</div>
-      <div class="no-print">
-        <button class="btn-pdf" onclick="window.print()">🖨 Save as PDF</button>
-        <button class="btn-png" onclick="savePng()">🪄 Save as PNG Sticker</button>
+      <div class="wrap" id="card">${clone.outerHTML}</div>
+      <div id="status"></div>
+      <div class="actions">
+        <button class="btn-png" onclick="savePng()">🪄 Download PNG Sticker</button>
         <button class="btn-close" onclick="window.close()">Close</button>
       </div>
       <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"><\/script>
       <script>
         async function savePng() {
+          const status = document.getElementById('status');
+          status.textContent = 'Generating...';
+          // Wait for fonts + image
+          await new Promise(r => setTimeout(r, 800));
           const el = document.querySelector('.wrap > div');
           const canvas = await html2canvas(el, {
             scale: 3,
             useCORS: true,
             allowTaint: true,
             backgroundColor: null,
-            logging: false
+            logging: false,
+            width: 480,
+            height: 310,
+            windowWidth: 480,
+            windowHeight: 310
           });
           canvas.toBlob(blob => {
             const url = URL.createObjectURL(blob);
@@ -1001,6 +1010,7 @@
             a.download = 'stash-spill-sticker-' + Date.now() + '.png';
             a.click();
             URL.revokeObjectURL(url);
+            status.textContent = 'Downloaded! ✓';
           }, 'image/png');
         }
       <\/script>
